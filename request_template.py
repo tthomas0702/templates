@@ -7,7 +7,8 @@ import argparse
 import requests
 
 
-def parse_args():
+def cmd_args():
+    """Handles command line arguments given."""
     parser = argparse.ArgumentParser(description='Put info here')
     parser.add_argument('-d',
                         '--debug',
@@ -31,16 +32,19 @@ def parse_args():
                         dest="password",
                         default='admin',
                         help='password for auth to host')
+    parsed_arguments = parser.parse_args()
 
-    opts = parser.parse_args()
+    # debug set print parser info
+    if parsed_arguments.debug is True:
+        print parsed_arguments
 
-    if opts.debug is True:
-        print opts
 
-    if opts.address is None:
-        parser.error("-a target BIG-IQ address is required, "
+    # required args here
+    if parsed_arguments.address is None:
+        parser.error("-a target address is required, "
                      "use 127.0.0.1 for local")
-    return opts
+
+    return parsed_arguments
 
 
 def to_unicode(unicode_or_str):
@@ -72,7 +76,4 @@ if __name__ == "__main__":
 
     print 'running main!'
 
-
-# TODO
-# argePArse not working right
-#  http://newcoder.io/api/part-4/
+    OPT = cmd_args()
