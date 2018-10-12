@@ -89,7 +89,7 @@ def get_auth_token(address, user, password,
     return request_result.json()['token']['token']
 
 
-def get(address, url, auth_token, debug=False, return_encoding='json'):
+def get(url, auth_token, debug=False, return_encoding='json'):
     """Generic GET function. The return_encoding can be:'text', 'json', 'content'(binary),
     or raw """
     headers = {'X-F5-Auth-Token':'{}'.format(auth_token), 'Content-Type':'application/json'}
@@ -141,7 +141,7 @@ if __name__ == "__main__":
     URI = '/mgmt/shared/identified-devices/config/device-info'
     URL_LIST = ['https://', OPT.address, URI]
     URL = ''.join(URL_LIST)
-    DEVICE_INFO = get(OPT.address, URL, TOKEN, OPT.debug)
+    DEVICE_INFO = get(URL, TOKEN, OPT.debug)
     print '{}\n{}\n{}'.format(
         DEVICE_INFO['hostname'], DEVICE_INFO['product'], DEVICE_INFO['version'])
     print type(DEVICE_INFO)
