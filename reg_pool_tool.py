@@ -11,7 +11,7 @@ version:
     0.0.1 incomplete
 Example:
 """
-
+from __future__ import print_function
 import argparse
 from base64 import b64encode
 from pprint import pprint
@@ -28,6 +28,11 @@ def cmd_args():
                         action="store_true",
                         default=False,
                         help='enable debug')
+    parser.add_argument('-v',
+                        '--verbose',
+                        action="store_true",
+                        default=False,
+                        help='enable verbose for options that have it')
     parser.add_argument('-a',
                         '--address',
                         action="store",
@@ -50,11 +55,18 @@ def cmd_args():
                         action="store_true",
                         default=False,
                         help='list the UUIDs for existing regkey pools, requires no args')
+    parser.add_argument('-o',
+                        '--offerings',
+                        action="store",
+                        dest="pool_uuid",
+                        help='take UUID of pool as arg and list the offerings for a pool'
+                             ' use -v to also show the active modules')
+
     parsed_arguments = parser.parse_args()
 
     # debug set print parser info
     if parsed_arguments.debug is True:
-        print parsed_arguments
+        print(parsed_arguments)
 
 
     # required args here
@@ -88,7 +100,7 @@ def to_str(unicode_or_str):
 
 
 def get_auth_token(address, user, password,
-                   uri='/mgmt/shared/authn/login', debug=False):  # -> unicode
+                   uri='/mgmt/shared/authn/login'):  # -> unicode
     """Get and auth token( to be used but other requests"""
     credentials_list = [user, ":", password]
     credentials = ''.join(credentials_list)
@@ -111,10 +123,10 @@ def get(url, auth_token, debug=False, return_encoding='json'):
     get_result = requests.get(url, headers=headers, verify=False)
 
     if debug is True:
-        print 'get_result.encoding: {}'.format(get_result.encoding)
-        print 'get_result.status_code: {}'.format(get_result.status_code)
-        print 'get_result.raise_for_status: {}'.format(
-            get_result.raise_for_status())
+        print('get_result.encoding: {}'.format(get_result.encoding))
+        print('get_result.status_code: {}'.format(get_result.status_code))
+        print('get_result.raise_for_status: {}'.format(
+            get_result.raise_for_status()))
 
     if return_encoding == 'json':
         return get_result.json()
@@ -126,13 +138,13 @@ def get(url, auth_token, debug=False, return_encoding='json'):
         return get_result.raw()  # requires 'stream=True' in request
 
 
-def post(url, auth_token, post_data, debug=False, return_encoding='json'):
+def post(url, auth_token, post_data):
     """ generic POST function """
     headers = {'X-F5-Auth-Token':'{}'.format(auth_token), 'Content-Type':'application/json'}
     post_data = '{"key":"value"}'
-    post_result = requests.post(url, auth_token, headers=headers, data=post_data, verify=False)
+    post_result = requests.post(url, auth_token, post_data, headers=headers, verify=False)
 
-    return get_result.json()
+    return post_result.json()
 
 
 def ls_pools():
@@ -141,10 +153,19 @@ def ls_pools():
     url_list = ['https://', OPT.address, uri]
     url = ''.join(url_list)
     pool_list_result = get(url, TOKEN, debug=False, return_encoding='json')
-    
+
     return pool_list_result['items']
 
 
+def list_offereings(regkey_pool_uuid):
+    """Returns a list of offerings for the regkey pool UUID given"""
+    url_list = ['https://', OPT.address, '/mgmt/cm/device/licensing/pool/regkey/licenses/',
+                regkey_pool_uuid, '/offerings']
+    url = ''.join(url_list)
+    offering_get_result = get(url, TOKEN, OPT.debug, return_encoding='json')
+    offering_list_result = offering_get_result['items']
+
+    return offering_list_result
 
 
 
@@ -159,17 +180,7 @@ if __name__ == "__main__":
     TOKEN = get_auth_token(OPT.address,
                            OPT.username,
                            OPT.password,
-                           uri='/mgmt/shared/authn/login',
-                           debug=False)
-
-    # test get by making request
-    #URI = '/mgmt/shared/identified-devices/config/device-info'
-    #URL_LIST = ['https://', OPT.address, URI]
-    #URL = ''.join(URL_LIST)
-    #DEVICE_INFO = get(URL, TOKEN, OPT.debug)
-    #print '{}\n{}\n{}'.format(
-    #    DEVICE_INFO['hostname'], DEVICE_INFO['product'], DEVICE_INFO['version'])
-    #print type(DEVICE_INFO)
+                           uri='/mgmt/shared/authn/login')
 
 
     if OPT.list_pools:
@@ -177,6 +188,26 @@ if __name__ == "__main__":
         for pool in REG_POOLS:
             print('{:38} {}'.format(pool['id'], pool['name']))
         print('\n')
+
+    if OPT.pool_uuid:
+        POOL_OFFERINGS = list_offereings(OPT.pool_uuid)
+        #print(POOL_OFFERINGS[0].keys())
+        #pprint(POOL_OFFERINGS['items'][0].keys())
+        #pprint(POOL_OFFERINGS['items'][0]['licenseText'])
+        print('{0:35}  {1:20} {2:10}'.format('RegKey', 'Status', 'addOnKeys'))
+        print(73 * '-')
+        for offering in  POOL_OFFERINGS:
+            if 'addOnKeys' in offering:
+                print('{0:35}  {1:20} {2:10}'.format(offering['regKey'], offering['status'], 'YES'))
+                # if verbose given list Active modules
+                if OPT.verbose:
+                    active_modules = offering['licenseText'].splitlines()
+                    for line in active_modules:
+                        if line.startswith('active module'):
+                            print('   {} '.format(line[:80]))
+            else:
+                print('{0:35}  {1:20} {2:10}'.format(offering['regKey'], offering['status'], offering.get('addOnKeys')))
+
 
 
 
