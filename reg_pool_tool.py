@@ -10,11 +10,32 @@ Python Version: 2.7.15
 version:
     0.0.1 incomplete
 Example:
+
+
+Copyright 2018 Tim Thomas
+
+Licensed under the Apache License, Version 2.0 (the "License"); you may not use
+this file except in compliance with the License. You may obtain a copy of the
+License at:
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software distributed
+under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+CONDITIONS OF ANY KIND, either express or implied. See the License for the
+specific language governing permissions and limitations under the License.
+
+
+
 """
+
 from __future__ import print_function
 import argparse
 from base64 import b64encode
+import json
 from pprint import pprint
+import sys
+import time
 import urllib3
 import requests
 
@@ -22,7 +43,8 @@ import requests
 ### Arguments parsing section ###
 def cmd_args():
     """Handles command line arguments given."""
-    parser = argparse.ArgumentParser(description='Put info here')
+    parser = argparse.ArgumentParser(description='This is a tool for working'
+                                                 'with regkey pool on BIG-IQ')
     parser.add_argument('-d',
                         '--debug',
                         action="store_true",
@@ -61,6 +83,30 @@ def cmd_args():
                         dest="pool_uuid",
                         help='take UUID of pool as arg and list the offerings for a pool'
                              ' use -v to also show the active modules')
+    parser.add_argument('-r',
+                        '--regkey',
+                        action="store",
+                        dest="reg_key",
+                        help='takes and stores the regkey for use in other options')
+    parser.add_argument('-A',
+                        '--add-on-keys',
+                        action="store",
+                        dest="add_on_key_list",
+                        help='takes list of addon keys for use by other options')
+    parser.add_argument('-i',
+                        '--install-offering',
+                        action="store",
+                        dest="install_pool_uuid",
+                        help='takes pool UUID as arg and installs new offering,'
+                             'requires -r, -A can be used to install addon keys at'
+                             'the same time')
+    parser.add_argument('-m',
+                        '--modify-offering-addons',
+                        action="store",
+                        dest="modify_pool_uuid",
+                        help='takes pool UUID as arg and installs addon to offering,'
+                             'requires -A [addon_key_list] and -r reg_key')
+
 
     parsed_arguments = parser.parse_args()
 
@@ -71,8 +117,16 @@ def cmd_args():
 
     # required args here
     if parsed_arguments.address is None:
-        parser.error("-a target address is required, "
-                     "use mgmt for local")
+        parser.error('-a target address is required, '
+                     'use mgmt for local')
+    if parsed_arguments.install_pool_uuid:
+        if parsed_arguments.reg_key is None:
+            parser.error('-i requires -r')
+    if parsed_arguments.modify_pool_uuid:
+        if parsed_arguments.add_on_key_list is None:
+            parser.error('-m requires -A and -r')
+        elif parsed_arguments.reg_key is None:
+            parser.error('-m requires -A and -r')
 
     return parsed_arguments
 
@@ -141,10 +195,23 @@ def get(url, auth_token, debug=False, return_encoding='json'):
 def post(url, auth_token, post_data):
     """ generic POST function """
     headers = {'X-F5-Auth-Token':'{}'.format(auth_token), 'Content-Type':'application/json'}
-    post_data = '{"key":"value"}'
-    post_result = requests.post(url, auth_token, post_data, headers=headers, verify=False)
+    #post_data = '{"key":"value"}'
+    post_result = requests.post(url, post_data, headers=headers, verify=False)
+    if OPT.debug is True:
+        print('post_result.encoding: {}'.format(post_result.encoding))
+        print('post_result.status_code: {}'.format(post_result.status_code))
+        print('post_result.raise_for_status: {}'.format(
+            post_result.raise_for_status()))
 
     return post_result.json()
+
+def patch(url, auth_token, patch_data):
+    """ generic PATCH function """
+    headers = {'X-F5-Auth-Token':'{}'.format(auth_token), 'Content-Type':'application/json'}
+    #patch_data = '{"key":"value"}'
+    patch_result = requests.patch(url, patch_data, headers=headers, verify=False)
+
+    return patch_result.json()
 
 
 def ls_pools():
@@ -169,6 +236,71 @@ def list_offereings(regkey_pool_uuid):
 
 
 
+
+def install_offering(regkey_pool_uuid, new_regkey, add_on_keys):
+    """
+    :type regkey_pool_uuid: str
+    :type new_regkey: str
+    :type add_on_keys: List[str]
+    """
+    uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
+    url_list = ['https://', OPT.address, uri, OPT.install_pool_uuid, '/offerings/']
+    url = ''.join(url_list)
+
+    if OPT.add_on_key_list:
+        post_dict = {"regKey": OPT.reg_key, "status": "ACTIVATING_AUTOMATIC", "addOnKeys": OPT.add_on_key_list.split(','), "description" : ""}
+    else:
+        post_dict = {"regKey": OPT.reg_key, "status": "ACTIVATING_AUTOMATIC", "description" : ""}
+    payload = json.dumps(post_dict)
+    try:
+        print(payload)
+        post_result = post(url, TOKEN, payload)
+        print('\nSent base regkey {} to License server\nstatus:'.format(OPT.reg_key))
+        print(type(post_result))
+    except:
+        print('Post to License server failed')
+        raise
+
+    # poll for "eulaText"
+    poll_result = {}
+    attempt = 0 # keep track of tries and give up exit script after 10
+    uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
+    url_list = ['https://', OPT.address, uri, OPT.install_pool_uuid, '/offerings/', OPT.reg_key]
+    url = ''.join(url_list)
+    while "eulaText" not in poll_result.keys():
+        try:
+            poll_result = get(url, TOKEN, OPT.debug, return_encoding='json')
+            print('\npoll {} for {}'.format(attempt +1, OPT.reg_key))
+            if "fail" in poll_result['message']:
+                sys.exit(poll_result['message'])
+            print(poll_result['status'])
+            print(poll_result['message'])
+            time.sleep(5)
+        except:
+            print('Poll for eula failed for regkey {}'.format(OPT.reg_key))
+            raise
+        attempt += 1
+        if attempt == 5:
+            sys.exit('Giving up after 5 tries to poll for EULA for RegKey')
+    print('Finished polling...')
+
+    # since we have eula back we need to patch back the eula
+    # update "status" in dict
+    poll_result["status"] = "ACTIVATING_AUTOMATIC_EULA_ACCEPTED"
+    uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
+    url_list = ['https://', OPT.address, uri, OPT.install_pool_uuid, '/offerings/', OPT.reg_key]
+    url = ''.join(url_list)
+    patch_dict = {"status":poll_result['status'], "eulaText": poll_result['eulaText']}
+    patch_payload = json.dumps(patch_dict)
+    print('sending PATCH to accept EULA for {}'.format(OPT.reg_key))
+    try:
+        patch_result = patch(url, TOKEN, patch_payload)
+        print('{} for {}'.format(patch_result['message'], OPT.reg_key))
+        print(patch_result["status"])
+    except:
+        raise
+
+
 if __name__ == "__main__":
 
     # suppress ssl warning when disbling ssl verification with verify=False
@@ -182,18 +314,16 @@ if __name__ == "__main__":
                            OPT.password,
                            uri='/mgmt/shared/authn/login')
 
-
+    # -l
     if OPT.list_pools:
         REG_POOLS = ls_pools()
         for pool in REG_POOLS:
             print('{:38} {}'.format(pool['id'], pool['name']))
         print('\n')
 
+    # -o
     if OPT.pool_uuid:
         POOL_OFFERINGS = list_offereings(OPT.pool_uuid)
-        #print(POOL_OFFERINGS[0].keys())
-        #pprint(POOL_OFFERINGS['items'][0].keys())
-        #pprint(POOL_OFFERINGS['items'][0]['licenseText'])
         print('{0:35}  {1:20} {2:10}'.format('RegKey', 'Status', 'addOnKeys'))
         print(73 * '-')
         for offering in  POOL_OFFERINGS:
@@ -206,7 +336,21 @@ if __name__ == "__main__":
                         if line.startswith('active module'):
                             print('   {} '.format(line[:80]))
             else:
-                print('{0:35}  {1:20} {2:10}'.format(offering['regKey'], offering['status'], offering.get('addOnKeys')))
+                print('{0:35}  {1:20} {2:10}'.format(offering['regKey'],
+                                                     offering['status'],
+                                                     offering.get('addOnKeys')))
+
+
+    # -i install new offereing with or without an addon keys
+    if OPT.install_pool_uuid:
+        install_offering(OPT.install_pool_uuid, OPT.reg_key, OPT.add_on_key_list)
+
+    
+    print('END')
+
+
+
+# TODO install_offering is working, need to clean up and then add install to exsiting offering
 
 
 
