@@ -92,7 +92,7 @@ def cmd_args():
                         '--add-on-keys',
                         action="store",
                         dest="add_on_key_list",
-                        help='takes list of addon keys for use by other options')
+                        help='takes string of comma sep addon keys for use by other options')
     parser.add_argument('-i',
                         '--install-offering',
                         action="store",
@@ -209,18 +209,24 @@ def patch(url, auth_token, patch_data):
     """ generic PATCH function """
     headers = {'X-F5-Auth-Token':'{}'.format(auth_token), 'Content-Type':'application/json'}
     #patch_data = '{"key":"value"}'
-    patch_result = requests.patch(url, patch_data, headers=headers, verify=False)
+    patch_result = requests.patch(url, patch_data, headers=headers, verify=False, timeout=5)
+    if OPT.debug is True:
+        print('patch_result.encoding: {}'.format(patch_result.encoding))
+        print('patch_result.status_code: {}'.format(patch_result.status_code))
+        print('patch_result.raise_for_status: {}'.format(
+            patch_result.raise_for_status()))
 
     return patch_result.json()
 
 
-def ls_pools():
+def ls_pools():  # -> List[{dict}]
     """ Lists existing regkey pools """
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses'
     url_list = ['https://', OPT.address, uri]
     url = ''.join(url_list)
     pool_list_result = get(url, TOKEN, debug=False, return_encoding='json')
 
+    # returns list of dict for each regkey pool
     return pool_list_result['items']
 
 
@@ -232,6 +238,7 @@ def list_offereings(regkey_pool_uuid):
     offering_get_result = get(url, TOKEN, OPT.debug, return_encoding='json')
     offering_list_result = offering_get_result['items']
 
+    # returns list of dictionaries of offerings
     return offering_list_result
 
 
@@ -241,22 +248,34 @@ def install_offering(regkey_pool_uuid, new_regkey, add_on_keys):
     """
     :type regkey_pool_uuid: str
     :type new_regkey: str
-    :type add_on_keys: List[str]
+    :type add_on_keys: str comma sep keys
+
+    This fucntion installs a new base regkey and optional addon keys and
+    install, and attempts to activate. All status in printed by the function
+    and there is no return statement. If it fails it will show that was well.
     """
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
     url_list = ['https://', OPT.address, uri, OPT.install_pool_uuid, '/offerings/']
     url = ''.join(url_list)
 
     if OPT.add_on_key_list:
-        post_dict = {"regKey": OPT.reg_key, "status": "ACTIVATING_AUTOMATIC", "addOnKeys": OPT.add_on_key_list.split(','), "description" : ""}
+        post_dict = {
+            "regKey": OPT.reg_key,
+            "status": "ACTIVATING_AUTOMATIC",
+            "addOnKeys": OPT.add_on_key_list.split(','),
+            "description" : ""
+        }
     else:
-        post_dict = {"regKey": OPT.reg_key, "status": "ACTIVATING_AUTOMATIC", "description" : ""}
+        post_dict = {
+            "regKey": OPT.reg_key,
+            "status": "ACTIVATING_AUTOMATIC",
+            "description" : ""
+        }
+    # format dict to make sure it is json compliant
     payload = json.dumps(post_dict)
     try:
-        print(payload)
         post_result = post(url, TOKEN, payload)
-        print('\nSent base regkey {} to License server\nstatus:'.format(OPT.reg_key))
-        print(type(post_result))
+        print('\nSent base regkey {} to License server status:'.format(OPT.reg_key))
     except:
         print('Post to License server failed')
         raise
@@ -296,18 +315,74 @@ def install_offering(regkey_pool_uuid, new_regkey, add_on_keys):
     try:
         patch_result = patch(url, TOKEN, patch_payload)
         print('{} for {}'.format(patch_result['message'], OPT.reg_key))
-        print(patch_result["status"])
+        print(patch_result.get('status', 'ERROR: Status Not found in path_result'))
     except:
         raise
 
 
+def modify_offering_addon(regkey_pool_uuid, new_regkey, add_on_keys):
+    """
+    :type regkey_pool_uuid: str
+    :type new_regkey: str
+    :type add_on_keys: str comma sep keys
+
+    """
+
+    uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
+    url_list = ['https://', OPT.address, uri, OPT.modify_pool_uuid, '/offerings/', OPT.reg_key]
+    url = ''.join(url_list)
+    patch_dict = {"status": "ACTIVATING_AUTOMATIC", "addOnKeys": OPT.add_on_key_list.split(',')}
+    payload = json.dumps(patch_dict)
+
+    try:
+        print('pre-PATCH')
+        patch_result = patch(url, TOKEN, payload)
+        print(patch_result)
+        print('\nAdding {} addons for offering {} to License server status:'.format(
+            OPT.add_on_key_list.split(','), OPT.reg_key))
+    except:
+        print('Post to License server failed')
+        raise
+
+    # poll for "eulaText"
+    poll_result = {}
+    attempt = 0 # keep track of tries and give up exit script after 10
+    uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
+    url_list = ['https://', OPT.address, uri, OPT.modify_pool_uuid, '/offerings/', OPT.reg_key]
+    url = ''.join(url_list)
+    while not poll_result.get('status'):
+        try:
+            poll_result = get(url, TOKEN, OPT.debug, return_encoding='json')
+            print('\npoll {} for {}, Addons: {}'.format(
+                attempt +1, OPT.reg_key, OPT.add_on_key_list.split(',')))
+            if "fail" in poll_result['message']:
+                sys.exit(poll_result['message'])
+            print(poll_result['status'])
+            print(poll_result['message'])
+            time.sleep(5)
+        except:
+            print('Poll for eula failed for regkey {}'.format(OPT.reg_key))
+            raise
+        attempt += 1
+        if attempt == 5:
+            sys.exit('Giving up after 5 tries to poll for EULA for RegKey')
+    print('Reactivation complete, try {} -o to see results for offering {}'.format(SCRIPT_NAME, OPT.reg_key))
+    print(poll_result.get('status'))
+    print('Finished polling...')
+
+
+
+
+
+
 if __name__ == "__main__":
+
+    SCRIPT_NAME = sys.argv[0]
 
     # suppress ssl warning when disbling ssl verification with verify=False
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     OPT = cmd_args()
-
     # This is the auth token that will be used in request(5 min timeout)
     TOKEN = get_auth_token(OPT.address,
                            OPT.username,
@@ -321,9 +396,9 @@ if __name__ == "__main__":
             print('{:38} {}'.format(pool['id'], pool['name']))
         print('\n')
 
-    # -o
+    # -o, if -v included will also show moodules
     if OPT.pool_uuid:
-        POOL_OFFERINGS = list_offereings(OPT.pool_uuid)
+        POOL_OFFERINGS = list_offereings(OPT.pool_uuid)  # list of dict of offerings
         print('{0:35}  {1:20} {2:10}'.format('RegKey', 'Status', 'addOnKeys'))
         print(73 * '-')
         for offering in  POOL_OFFERINGS:
@@ -331,27 +406,30 @@ if __name__ == "__main__":
                 print('{0:35}  {1:20} {2:10}'.format(offering['regKey'], offering['status'], 'YES'))
                 # if verbose given list Active modules
                 if OPT.verbose:
-                    active_modules = offering['licenseText'].splitlines()
+                    active_modules = offering.get('licenseText', 'Not available').splitlines()
                     for line in active_modules:
                         if line.startswith('active module'):
                             print('   {} '.format(line[:80]))
             else:
+                # -v not given list without active module info
                 print('{0:35}  {1:20} {2:10}'.format(offering['regKey'],
                                                      offering['status'],
                                                      offering.get('addOnKeys')))
 
 
-    # -i install new offereing with or without an addon keys
+    # -i install new offereing with or without an addon keys, requires -r
     if OPT.install_pool_uuid:
         install_offering(OPT.install_pool_uuid, OPT.reg_key, OPT.add_on_key_list)
 
-    
+    # -m requires -r -A 
+    if OPT.modify_pool_uuid:
+        modify_offering_addon(OPT.modify_pool_uuid, OPT.reg_key, OPT.add_on_key_list)    
+
     print('END')
 
 
 
-# TODO install_offering is working, need to clean up and then add install to exsiting offering
-
+# TODO test timeout in patch
 
 
 
