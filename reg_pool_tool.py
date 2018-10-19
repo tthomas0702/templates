@@ -4,12 +4,21 @@
 """
 File name: reg_pool_tool.py
 Author: Tim Thomas
-Date created: 10/12/2018
-Date last modified: 10/12/2018
+Date created: 10/19/2018
+Date last modified: 10/19/2018
 Python Version: 2.7.15
 version:
-    0.0.1 incomplete
+    0.0.1 
+
+./reg_pool_tool.py -h for usage.
+
+
 Example:
+
+To install addon key to existing offering:
+
+./reg_pool_tool.py -a 10.3.214.7 -m <reg_key_pool> -r <offering> -A <add_on_key>
+
 
 
 Copyright 2018 Tim Thomas
@@ -27,13 +36,16 @@ specific language governing permissions and limitations under the License.
 
 
 
+
+
+
 """
 
 from __future__ import print_function
 import argparse
 from base64 import b64encode
 import json
-from pprint import pprint
+#from pprint import pprint
 import sys
 import time
 import urllib3
@@ -133,26 +145,6 @@ def cmd_args():
 ### END ARGPARSE SECTION ###
 
 
-def to_unicode(unicode_or_str):
-    """This function is used to make sure that they instance you are working with
-    is unicode, this version of the function is for python 2.x"""
-    if isinstance(unicode_or_str, str):
-        value = unicode_or_str.decode('utf-8')
-    else:
-        value = unicode_or_str
-    return value  # Instance of unicode
-
-
-def to_str(unicode_or_str):
-    """This function is used to make sure that they instance you are working with
-    is a str, this version of the function is for python 2.x"""
-    if isinstance(unicode_or_str, unicode):
-        value = unicode_or_str.encode('utf-8')
-    else:
-        value = unicode_or_str
-    return value  # Instance of str
-
-
 def get_auth_token(address, user, password,
                    uri='/mgmt/shared/authn/login'):  # -> unicode
     """Get and auth token( to be used but other requests"""
@@ -163,7 +155,14 @@ def get_auth_token(address, user, password,
     post_data = '{"username":"' + user + '","password":"' + password +'"}'
     url_list = ['https://', address, uri]
     url = ''.join(url_list)
-    request_result = requests.post(url, headers=headers, data=post_data, verify=False)
+    try:
+        request_result = requests.post(url, headers=headers, data=post_data, verify=False)
+    except requests.exceptions.ConnectionError as connection_error:
+        print(connection_error)
+        sys.exit(1)
+    except requests.exceptions.RequestException as request_exception:
+        print(request_exception)
+        sys.exit(1)
 
     #returns an instance of unicode that is an auth token with 300 dec timeout
     return request_result.json()['token']['token']
@@ -177,6 +176,7 @@ def get(url, auth_token, debug=False, return_encoding='json'):
     get_result = requests.get(url, headers=headers, verify=False)
 
     if debug is True:
+        print('GET request...')
         print('get_result.encoding: {}'.format(get_result.encoding))
         print('get_result.status_code: {}'.format(get_result.status_code))
         print('get_result.raise_for_status: {}'.format(
@@ -192,12 +192,21 @@ def get(url, auth_token, debug=False, return_encoding='json'):
         return get_result.raw()  # requires 'stream=True' in request
 
 
-def post(url, auth_token, post_data):
+def post(url, auth_token, post_data, debug):
     """ generic POST function """
     headers = {'X-F5-Auth-Token':'{}'.format(auth_token), 'Content-Type':'application/json'}
     #post_data = '{"key":"value"}'
-    post_result = requests.post(url, post_data, headers=headers, verify=False)
-    if OPT.debug is True:
+    try:
+        post_result = requests.post(url, post_data, headers=headers, verify=False, timeout=10)
+    except requests.exceptions.ConnectionError as connection_error:
+        print ("Error Connecting: {}".format(connection_error))
+        sys.exit(1)
+    except requests.exceptions.RequestException as request_exception:
+        print(request_exception)
+        sys.exit(1)
+
+    if debug is True:
+        print('POST request...')
         print('post_result.encoding: {}'.format(post_result.encoding))
         print('post_result.status_code: {}'.format(post_result.status_code))
         print('post_result.raise_for_status: {}'.format(
@@ -205,12 +214,22 @@ def post(url, auth_token, post_data):
 
     return post_result.json()
 
-def patch(url, auth_token, patch_data):
-    """ generic PATCH function """
+
+def patch(url, auth_token, patch_data, debug):
+    """generic PATCH function"""
     headers = {'X-F5-Auth-Token':'{}'.format(auth_token), 'Content-Type':'application/json'}
     #patch_data = '{"key":"value"}'
-    patch_result = requests.patch(url, patch_data, headers=headers, verify=False, timeout=5)
-    if OPT.debug is True:
+    try:
+        patch_result = requests.patch(url, patch_data, headers=headers, verify=False, timeout=10)
+    except requests.exceptions.ConnectionError as connection_error:
+        print ("Error Connecting: {}".format(connection_error))
+        sys.exit(1)
+    except requests.exceptions.RequestException as request_exception:
+        print(request_exception)
+        sys.exit(1)
+
+    if debug is True:
+        print('PATCH request...')
         print('patch_result.encoding: {}'.format(patch_result.encoding))
         print('patch_result.status_code: {}'.format(patch_result.status_code))
         print('patch_result.raise_for_status: {}'.format(
@@ -219,23 +238,23 @@ def patch(url, auth_token, patch_data):
     return patch_result.json()
 
 
-def ls_pools():  # -> List[{dict}]
+def ls_pools(address, auth_token):  # -> List[{dict}]
     """ Lists existing regkey pools """
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses'
-    url_list = ['https://', OPT.address, uri]
+    url_list = ['https://', address, uri]
     url = ''.join(url_list)
-    pool_list_result = get(url, TOKEN, debug=False, return_encoding='json')
+    pool_list_result = get(url, auth_token, debug=False, return_encoding='json')
 
     # returns list of dict for each regkey pool
     return pool_list_result['items']
 
 
-def list_offereings(regkey_pool_uuid):
+def list_offereings(address, auth_token, regkey_pool_uuid):
     """Returns a list of offerings for the regkey pool UUID given"""
-    url_list = ['https://', OPT.address, '/mgmt/cm/device/licensing/pool/regkey/licenses/',
+    url_list = ['https://', address, '/mgmt/cm/device/licensing/pool/regkey/licenses/',
                 regkey_pool_uuid, '/offerings']
     url = ''.join(url_list)
-    offering_get_result = get(url, TOKEN, OPT.debug, return_encoding='json')
+    offering_get_result = get(url, auth_token, debug=False, return_encoding='json')
     offering_list_result = offering_get_result['items']
 
     # returns list of dictionaries of offerings
@@ -243,8 +262,9 @@ def list_offereings(regkey_pool_uuid):
 
 
 
-
-def install_offering(regkey_pool_uuid, new_regkey, add_on_keys):
+#pylint: disable-msg=too-many-arguments
+# pylint: disable-msg=too-many-locals
+def install_offering(address, auth_token, regkey_pool_uuid, new_regkey, add_on_keys, debug):
     """
     :type regkey_pool_uuid: str
     :type new_regkey: str
@@ -255,27 +275,27 @@ def install_offering(regkey_pool_uuid, new_regkey, add_on_keys):
     and there is no return statement. If it fails it will show that was well.
     """
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
-    url_list = ['https://', OPT.address, uri, OPT.install_pool_uuid, '/offerings/']
+    url_list = ['https://', address, uri, regkey_pool_uuid, '/offerings/']
     url = ''.join(url_list)
 
-    if OPT.add_on_key_list:
+    if add_on_keys:
         post_dict = {
-            "regKey": OPT.reg_key,
+            "regKey": new_regkey,
             "status": "ACTIVATING_AUTOMATIC",
-            "addOnKeys": OPT.add_on_key_list.split(','),
+            "addOnKeys": add_on_keys.split(','),
             "description" : ""
         }
     else:
         post_dict = {
-            "regKey": OPT.reg_key,
+            "regKey": new_regkey,
             "status": "ACTIVATING_AUTOMATIC",
             "description" : ""
         }
     # format dict to make sure it is json compliant
     payload = json.dumps(post_dict)
     try:
-        post_result = post(url, TOKEN, payload)
-        print('\nSent base regkey {} to License server status:'.format(OPT.reg_key))
+        post(url, auth_token, payload, debug)
+        print('\nSent base regkey {} to License server status:'.format(new_regkey))
     except:
         print('Post to License server failed')
         raise
@@ -284,19 +304,19 @@ def install_offering(regkey_pool_uuid, new_regkey, add_on_keys):
     poll_result = {}
     attempt = 0 # keep track of tries and give up exit script after 10
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
-    url_list = ['https://', OPT.address, uri, OPT.install_pool_uuid, '/offerings/', OPT.reg_key]
+    url_list = ['https://', address, uri, regkey_pool_uuid, '/offerings/', new_regkey]
     url = ''.join(url_list)
     while "eulaText" not in poll_result.keys():
         try:
-            poll_result = get(url, TOKEN, OPT.debug, return_encoding='json')
-            print('\npoll {} for {}'.format(attempt +1, OPT.reg_key))
+            poll_result = get(url, auth_token, debug, return_encoding='json')
+            print('\npoll {} for {}'.format(attempt +1, new_regkey))
             if "fail" in poll_result['message']:
                 sys.exit(poll_result['message'])
             print(poll_result['status'])
             print(poll_result['message'])
             time.sleep(5)
         except:
-            print('Poll for eula failed for regkey {}'.format(OPT.reg_key))
+            print('Poll for eula failed for regkey {}'.format(new_regkey))
             raise
         attempt += 1
         if attempt == 5:
@@ -307,20 +327,20 @@ def install_offering(regkey_pool_uuid, new_regkey, add_on_keys):
     # update "status" in dict
     poll_result["status"] = "ACTIVATING_AUTOMATIC_EULA_ACCEPTED"
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
-    url_list = ['https://', OPT.address, uri, OPT.install_pool_uuid, '/offerings/', OPT.reg_key]
+    url_list = ['https://', address, uri, regkey_pool_uuid, '/offerings/', new_regkey]
     url = ''.join(url_list)
     patch_dict = {"status":poll_result['status'], "eulaText": poll_result['eulaText']}
     patch_payload = json.dumps(patch_dict)
-    print('sending PATCH to accept EULA for {}'.format(OPT.reg_key))
+    print('sending PATCH to accept EULA for {}'.format(new_regkey))
     try:
-        patch_result = patch(url, TOKEN, patch_payload)
-        print('{} for {}'.format(patch_result['message'], OPT.reg_key))
+        patch_result = patch(url, auth_token, patch_payload, debug)
+        print('{} for {}'.format(patch_result['message'], new_regkey))
         print(patch_result.get('status', 'ERROR: Status Not found in path_result'))
     except:
         raise
 
 
-def modify_offering_addon(regkey_pool_uuid, new_regkey, add_on_keys):
+def modify_offering_addon(address, auth_token, regkey_pool_uuid, new_regkey, add_on_keys, debug):
     """
     :type regkey_pool_uuid: str
     :type new_regkey: str
@@ -329,17 +349,15 @@ def modify_offering_addon(regkey_pool_uuid, new_regkey, add_on_keys):
     """
 
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
-    url_list = ['https://', OPT.address, uri, OPT.modify_pool_uuid, '/offerings/', OPT.reg_key]
+    url_list = ['https://', address, uri, regkey_pool_uuid, '/offerings/', new_regkey]
     url = ''.join(url_list)
-    patch_dict = {"status": "ACTIVATING_AUTOMATIC", "addOnKeys": OPT.add_on_key_list.split(',')}
+    patch_dict = {"status": "ACTIVATING_AUTOMATIC", "addOnKeys": add_on_keys.split(',')}
     payload = json.dumps(patch_dict)
 
     try:
-        print('pre-PATCH')
-        patch_result = patch(url, TOKEN, payload)
-        print(patch_result)
+        patch(url, auth_token, payload, debug)
         print('\nAdding {} addons for offering {} to License server status:'.format(
-            OPT.add_on_key_list.split(','), OPT.reg_key))
+            add_on_keys.split(','), new_regkey))
     except:
         print('Post to License server failed')
         raise
@@ -348,30 +366,27 @@ def modify_offering_addon(regkey_pool_uuid, new_regkey, add_on_keys):
     poll_result = {}
     attempt = 0 # keep track of tries and give up exit script after 10
     uri = '/mgmt/cm/device/licensing/pool/regkey/licenses/'
-    url_list = ['https://', OPT.address, uri, OPT.modify_pool_uuid, '/offerings/', OPT.reg_key]
+    url_list = ['https://', address, uri, regkey_pool_uuid, '/offerings/', new_regkey]
     url = ''.join(url_list)
     while not poll_result.get('status'):
         try:
-            poll_result = get(url, TOKEN, OPT.debug, return_encoding='json')
+            poll_result = get(url, auth_token, debug, return_encoding='json')
             print('\npoll {} for {}, Addons: {}'.format(
-                attempt +1, OPT.reg_key, OPT.add_on_key_list.split(',')))
+                attempt +1, new_regkey, add_on_keys.split(',')))
             if "fail" in poll_result['message']:
                 sys.exit(poll_result['message'])
             print(poll_result['status'])
             print(poll_result['message'])
             time.sleep(5)
         except:
-            print('Poll for eula failed for regkey {}'.format(OPT.reg_key))
+            print('Poll for eula failed for regkey {}'.format(new_regkey))
             raise
         attempt += 1
         if attempt == 5:
             sys.exit('Giving up after 5 tries to poll for EULA for RegKey')
-    print('Reactivation complete, try {} -o to see results for offering {}'.format(SCRIPT_NAME, OPT.reg_key))
+    print('Reactivation complete')
     print(poll_result.get('status'))
     print('Finished polling...')
-
-
-
 
 
 
@@ -383,22 +398,29 @@ if __name__ == "__main__":
     urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
     OPT = cmd_args()
+
     # This is the auth token that will be used in request(5 min timeout)
     TOKEN = get_auth_token(OPT.address,
                            OPT.username,
                            OPT.password,
                            uri='/mgmt/shared/authn/login')
 
+    # STATIC GLOBALS
+    ADDRESS = OPT.address
+    DEBUG = OPT.debug
+
+
     # -l
     if OPT.list_pools:
-        REG_POOLS = ls_pools()
+        REG_POOLS = ls_pools(ADDRESS, TOKEN)
         for pool in REG_POOLS:
             print('{:38} {}'.format(pool['id'], pool['name']))
         print('\n')
 
     # -o, if -v included will also show moodules
     if OPT.pool_uuid:
-        POOL_OFFERINGS = list_offereings(OPT.pool_uuid)  # list of dict of offerings
+        REG_KEY_POOL_UUID = OPT.pool_uuid
+        POOL_OFFERINGS = list_offereings(ADDRESS, TOKEN, REG_KEY_POOL_UUID)
         print('{0:35}  {1:20} {2:10}'.format('RegKey', 'Status', 'addOnKeys'))
         print(73 * '-')
         for offering in  POOL_OFFERINGS:
@@ -419,18 +441,16 @@ if __name__ == "__main__":
 
     # -i install new offereing with or without an addon keys, requires -r
     if OPT.install_pool_uuid:
-        install_offering(OPT.install_pool_uuid, OPT.reg_key, OPT.add_on_key_list)
+        INSTALL_POOL = OPT.install_pool_uuid
+        NEW_REGKEY = OPT.reg_key
+        ADD_ON_KEY_LIST = OPT.add_on_key_list
+        install_offering(ADDRESS, TOKEN, INSTALL_POOL, NEW_REGKEY, ADD_ON_KEY_LIST, DEBUG)
 
-    # -m requires -r -A 
+    # -m requires -r -A
     if OPT.modify_pool_uuid:
-        modify_offering_addon(OPT.modify_pool_uuid, OPT.reg_key, OPT.add_on_key_list)    
+        MODIFY_POOL = OPT.modify_pool_uuid
+        OFFERING = OPT.reg_key
+        ADD_ON_KEY_LIST = OPT.add_on_key_list
+        modify_offering_addon(ADDRESS, TOKEN, MODIFY_POOL, OFFERING, ADD_ON_KEY_LIST, DEBUG)
 
-    print('END')
-
-
-
-# TODO test timeout in patch
-
-
-
-
+    print('SCRIPT END')
