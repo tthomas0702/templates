@@ -1,0 +1,104 @@
+#!/usr/bin/python3
+
+
+'''
+ver 0.0.1
+argparse starter file
+'''
+
+
+import argparse
+import sys
+
+
+
+
+### Arguments parsing section ###
+def cmd_args():
+    """Handles command line arguments given."""
+    parser = argparse.ArgumentParser(description='Put script discription '
+                                                 'here')
+    parser.add_argument('-d',
+                        '--debug',
+                        action='store_true',
+                        default=False,
+                        help='enable debug')
+    parser.add_argument('-l',
+                        '--list',
+                        action='store_true',
+                        default=False,
+                        help='List all address entries')
+    parser.add_argument('-s',
+                        '--slot',
+                        type=int,
+                        action='store',
+                        dest='slot_number',
+                        required=False,
+                        #default='100',
+                        help='repro slot to restore values 1-4 accepted')
+    parser.add_argument('-u',
+                        '--username',
+                        action='store',
+                        dest='username',
+                        #required=True,
+                        default='root',
+                        help='root user name for devices')
+    parser.add_argument('-p',
+                        '--password',
+                        action='store',
+                        dest='password',
+                        #required=True,
+                        default='default',
+                        help='root password to connect to devices')
+    parser.add_argument('-U',
+                        '--admin-Username',
+                        action='store',
+                        dest='admin_username',
+                        #required=True,
+                        default='admin',
+                        help='admin user name for devices')
+    parser.add_argument('-P',
+                        '--admin-password',
+                        action='store',
+                        dest='admin_password',
+                        #required=True,
+                        default='admin',
+                        help='admin password to connect to devices')
+    parser.add_argument('-m',
+                        '--map-update',
+                        action='store_true',
+                        default=False,
+                        help='update SR Map ')
+    parser.add_argument('-r',
+                        '--remove',
+                        action='store_true',
+                        default=False,
+                        help='remove slot from  SR Map ')
+
+
+    parsed_arguments = parser.parse_args()
+
+    # debug set print parser info
+    if parsed_arguments.debug is True:
+        print(parsed_arguments)
+
+
+    return parsed_arguments
+
+### END ARGPARSE SECTION ###
+
+
+# put functions and classes in this section
+
+
+if __name__ == "__main__":
+
+    OPT = cmd_args()
+    #UPDATE = OPT.map_update
+    #REMOVE = OPT.remove
+    SCRIPT_NAME = sys.argv[0]
+    
+    
+
+
+   
